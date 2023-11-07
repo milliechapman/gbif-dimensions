@@ -1,0 +1,308 @@
+---
+title: "Figure 1: Examples of global biodiversity data disparities"
+format: pdf
+editor: visual
+---
+
+## Load in packages
+
+```{r}
+library(geomtextpath)
+library(gbifdb) 
+library(tidyverse) 
+library(gbifdb) 
+library(fst) 
+library(sf) 
+library(terra)
+library(raster)
+library(MetBrewer)
+library(rnaturalearth)
+library(countrycode)
+```
+
+## Connect to GBIF snapshot (Oct 2023)
+
+```{r}
+gbif <- gbif_local("/home/shared-data/gbif/occurrence/2023-10-01/occurrence.parquet/", backend="duckdb")
+```
+
+## Panel A: Global map
+
+```{r}
+df <- gbif |> 
+  mutate(latitude = round(decimallatitude,1), 
+         longitude = round(decimallongitude,1)) |> 
+  filter(year >1800) |>
+  count(longitude, latitude) |> 
+  collect() |> 
+  mutate(n = log(n)) 
+```
+
+```{r}
+df_spatial <- df |> 
+  filter(!is.na(latitude), 
+         !is.na(longitude)) |> 
+  st_as_sf(coords = c("longitude", "latitude"), 
+           crs = "epsg:4326") |> 
+  mutate(n = exp(n)) 
+```
+
+```{r}
+ras_temp <-raster(xmn=-180, xmx=180, ymn=-90, ymx=90,
+                  resolution=c(0.1,0.1), vals=NA)
+global_plot <- rasterize(df_spatial, ras_temp, field = "n", fun='sum') 
+# put point in raster # or use the short form "+proj=robin" 
+rm(df_spatial)
+rm(ras_temp)
+
+crs <- "+proj=robin +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m" 
+
+global_plot <- terra::rast(global_plot) 
+global_plot <- global_plot * 1 # to deal with NAs in this datasaet 
+
+global_plot_rob <- terra::project(global_plot, crs, mask=TRUE) 
+rm(global_plot)
+colors <- c("grey", met.brewer(name="Isfahan1",n=20,type="continuous"))
+
+plot(log(global_plot), col = colors, axes = FALSE)
+```
+
+## Panel B: Macroeconomic patterns
+
+```{r}
+world <- ne_countries(type = "countries", scale = "medium")
+world <- st_as_sf(world) |>
+  dplyr::select(iso_a2, income_grp) |>
+  st_make_valid() |>
+  mutate(area = st_area(geometry)) |>
+  as_tibble() |>
+  dplyr::select(-geometry) |>
+  mutate(area = as.numeric(area)) |>
+  rename(countrycode = iso_a2)
+```
+
+```{r}
+country_year <-  gbif |>
+    count(countrycode, year) |>
+    collect()
+```
+
+```{r}
+country_year %>% filter(year >1900 & year < 2022) |>
+  mutate(n = replace_na(n, 0)) %>%
+  left_join(world) %>%
+  mutate(income_grp = str_sub(income_grp, 4, -1),
+         #INCOME_GRP = gsub("\\s", "\n", INCOME_GRP),
+         income_grp = gsub("\\:.*","",income_grp)) %>%
+  group_by(year, income_grp) %>% 
+  summarise(n = sum(n, na.rm = TRUE)) %>% drop_na() %>%
+  ggplot(aes(year, log(n), color = income_grp, label = income_grp)) + 
+  geom_textline(size = 3, fontface = 2, spacing = 30, text_smoothing = 50) + 
+  theme_classic() +
+  theme(legend.position = "none", legend.title = element_blank()) +
+  labs(x = "") +  scale_color_manual(values=met.brewer("Homer2", 4)) +
+  theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid'))
+```
+
+## Panel C: Redlining
+
+```{r}
+holc <- st_read("https://dsl.richmond.edu/panorama/redlining/static/fullDownload.geojson") |>
+  dplyr::select(state, city, holc_grade, geometry) |>
+  dplyr::filter(!is.na(holc_grade) & holc_grade != 'E') |>
+  sf::st_make_valid() 
+
+holc <- holc |>
+  dplyr::mutate(valid =st_is_valid(holc)) |> 
+  dplyr::filter(valid=="TRUE")
+
+holc_area  <- holc |>
+  mutate(area = st_area(geometry)) |>
+  as_tibble() |>
+  dplyr::select(-geometry) |>
+  group_by(holc_grade) |>
+  summarise(area = sum(area)) |>
+  mutate(area = as.numeric(area)) |>
+  ungroup()
+```
+
+```{r}
+US_pts <- gbif |>
+   filter(countrycode == "US") |>
+   mutate(latitude = round(decimallatitude,3), 
+         longitude = round(decimallongitude,3)) |>
+  count(decimallatitude, decimallongitude) |>
+  collect()
+```
+
+```{r}
+US_pts <- US_pts |>
+  filter(!is.na(decimallatitude), 
+         !is.na(decimallongitude)) |>
+  st_as_sf(coords = c("decimallongitude", "decimallatitude"), 
+           crs = st_crs(holc)) 
+```
+
+```{r fig.width=10, fig.height=10}
+plot_gbif <- US_pts |>
+  mutate(n = )
+  top_n(200000) 
+
+|>
+  ggplot() +
+  geom_sf(aes(geometry = geometry), alpha = 0.05,
+            size = 0.001, color= "grey") +
+  theme(legend.position = "none")
+
+ggsave("../figures/plot_gbif_us.png",plot_gbif, height = 10, width = 10, dpi =300)
+```
+
+```{r}
+la <- holc |> filter(city == "Los Angeles") 
+ext_la <- ext(la) 
+pts_la <- US_year |> 
+  dplyr::select(decimallongitude, decimallatitude, year, n) |>
+  rename(lon = decimallongitude, lat = decimallatitude) |>
+  filter(lon > ext_la[1] & lon < ext_la[2] &
+           lat > ext_la[3] & lat < ext_la[4])
+
+holc_la <- holc |> filter(city == "Los Angeles") |>
+  ggplot() + 
+  geom_sf(aes(fill = holc_grade), alpha = 0.7, lwd = 0) +
+    scale_fill_manual(values=c("green4","dodgerblue3", "gold1", "firebrick4")) +
+  theme_void() + 
+  geom_point(data = pts_la, aes(x = lon, y = lat), color = "grey", alpha= 0.1, size = 0.01) +
+ggspatial::annotation_scale() + theme(legend.position = "none")
+
+ggsave("../figures/plot_gbif_holcLA.png",holc_la, height = 5, width = 5, dpi =300)
+```
+
+```{r}
+holc_obs <- st_join(us_pts, holc, join = st_within)
+holc_obs |> drop_na() |> filter(state=="CA")
+```
+
+```{r}
+redlining <- as_tibble(holc_obs) %>% drop_na() %>%  
+  group_by(holc_grade) %>%
+  summarise(counts = sum(n)) %>% ungroup() %>%
+  left_join(holc_area) %>%
+  mutate(density = counts/area) %>%
+  ggplot(aes(x = holc_grade, y = density*1000, fill = holc_grade)) + 
+  scale_fill_manual(values=c("green4","dodgerblue3", "gold1", "firebrick4")) +
+  geom_col(width = 0.6, alpha = 0.7) + theme_classic() + theme(legend.position = "none") + 
+  labs(x = "holc grade", y = "sampling density (obs per area)") + coord_flip() #+
+  #facet_wrap(~basisofrecord, scales = "free")
+
+
+ggsave("../figures/holc-summary.png", redlining, height = 3, width = 3.5, dpi = 300)
+```
+
+### Map of US
+
+### Map of LA
+
+### Redlining
+
+## Panel D: Conflict
+
+```{r}
+country_year <-  gbif |>
+    count(countrycode, year) |>
+    collect()
+```
+
+```{r}
+#download.file(url = "https://ucdp.uu.se/downloads/ucdpprio/ucdp-prio-acd-231-rds.zip", destfile = "data/conflict.zip")
+#unzip("data/conflict.zip", exdir = "data/")
+
+conflict <- readRDS("data/UcdpPrioConflict_v23_1.rds") |>
+  dplyr::select(location, year, intensity_level) |>
+  separate_rows(location, sep = ",") |>
+  mutate(countrycode = countrycode(location, origin = 'country.name', destination = 'iso2c'))
+```
+
+```{r}
+b <- country_year %>%
+  left_join(conflict) %>%
+  dplyr::select(-location) %>%
+  filter(year >1950) %>%
+  mutate(intensity_level = replace_na(intensity_level, 0)) %>%
+  mutate(n = replace_na(n, 0)) %>%
+  filter(countrycode == "KH") %>% 
+  group_by(countrycode, year) |>
+  summarise(intensity_level = max(intensity_level),
+            n = mean(n, na.rm = TRUE)) |>
+  unique() %>% 
+  ggplot() + 
+  geom_col(aes(year, (log(n)), fill = as.factor(intensity_level))) + 
+  scale_fill_manual(values= c("darkgrey", "#FF4433", "darkred")) +
+  #scale_fill_manual(values=met.brewer("Renoir", 4)) +
+  #geom_line(aes(year, v2xcl_dmove*10), lwd = 1.5, color = "black") + 
+  theme_classic() + theme(legend.position = "none", axis.title.x = element_blank()) +
+  scale_y_continuous(
+    # Features of the first axis
+    name = "log(observations)"#,
+    # Add a second axis and specify its features
+    #sec.axis = sec_axis( trans=~./10, name="freedom of movement")
+  ) #+ geom_line(aes(x = year, y = intensity_level*5)) +
+
+ggsave("../figures/war-cambodia.png",b, width = 6, height = 3, dpi = 300)
+```
+
+## Panel E: Colonialism
+
+```{r}
+download.file("https://geonode.wfp.org/geoserver/wfs?format_options=charset:UTF-8&typename=geonode:khm_adm1_un&outputFormat=SHAPE-ZIP&version=1.0.0&service=WFS&request=GetFeature", destfile = "../data/cambodia.zip")
+unzip("../data/cambodia.zip", "../data/")
+cambodia <- st_read("../data/khm_adm1_un.shp")
+```
+
+```{r}
+NG_year <- gbif %>%
+    filter(countrycode == "NG") %>%
+    count(year, basisofrecord, datasetkey) %>%
+    collect()
+
+orgs <- read_tsv("https://api.gbif.org/v1/dataset/search/export?format=TSV&") %>%
+  dplyr::select(publishing_country, dataset_key, title) %>%
+  rename(datasetkey = dataset_key)
+
+NG_year_summary <- NG_year |>
+  left_join(orgs) |>
+  mutate() |>
+  mutate(country_data = ifelse(publishing_country == "GB", "GB", 
+                               ifelse(publishing_country == "NG", "NG", "other"))) |>
+  mutate(precol = ifelse(year <1961,"1","2")) |>
+  group_by(country_data, precol) |>
+  summarise(n = sum(n)) |>
+  drop_na()
+
+t1 <- NG_year_summary |> 
+  group_by(precol) |> mutate(total_obs = sum(n)) |> ungroup()|>
+  mutate(perc_obs = n/total_obs) |> filter(precol == "1") |>
+  arrange(desc(perc_obs)) %>%
+  mutate(lab.pos = cumsum(perc_obs)-.5*perc_obs)
+
+b <- ggplot(data = t1, 
+       aes(x = 2, y = perc_obs, fill = country_data))+
+  geom_bar(stat = "identity")+
+  coord_polar("y", start = 200) +
+  #geom_text(aes(y = lab.pos, label = paste(perc_obs,"%", sep = "")), col = "white") +
+  theme_void() +
+  scale_fill_brewer(palette = "Dark2") + xlim(.2,2.5)
+
+t2 <- NG_year_summary |> 
+  group_by(precol) |> mutate(total_obs = sum(n)) |> ungroup()|>
+  mutate(perc_obs = n/total_obs) |> filter(precol == "2") |>
+  arrange(desc(perc_obs)) %>%
+  mutate(lab.pos = cumsum(perc_obs)-.5*perc_obs)
+
+a <- ggplot(data = t2, 
+       aes(x = 2, y = perc_obs, fill = country_data))+
+  geom_bar(stat = "identity")+
+  coord_polar("y", start = 200) +
+  #geom_text(aes(y = lab.pos, label = paste(perc_obs,"%", sep = "")), col = "white") +
+  theme_void() +
+  scale_fill_brewer(palette = "Dark2") + xlim(.2,2.5)
+```
