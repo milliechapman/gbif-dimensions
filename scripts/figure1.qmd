@@ -16,7 +16,12 @@ In Figure 1, we leverage a the Global Biodiversity Information Facility Data to 
 ## Reproducing Figure 1:
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(
+  warning = FALSE, # show warnings
+  message = FALSE, # show messages
+  error = TRUE, # do not interrupt generation in case of errors,
+  echo = TRUE  # show R code
+)
 ```
 
 ```{r}
@@ -71,7 +76,7 @@ df_spatial <- df |>
   mutate(n = exp(n)) 
 ```
 
-```{r}
+```{r cache = TRUE}
 ras_temp <-raster(xmn=-180, xmx=180, ymn=-90, ymx=90,
                   resolution=c(0.1,0.1), vals=NA)
 global_plot <- rasterize(df_spatial, ras_temp, field = "n", fun='sum') 
@@ -80,7 +85,7 @@ rm(df_spatial)
 rm(ras_temp)
 ```
 
-```{r}
+```{r cache=TRUE}
 crs <- "+proj=robin +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m" 
 global_plot <- terra::rast(global_plot) 
 global_plot <- global_plot * 1 # to deal with NAs in this datasaet 
@@ -291,13 +296,13 @@ ggsave("../figures/war-cambodia.png",conflict, width = 6, height = 3, dpi = 300)
 ```
 
 ```{r cache = TRUE}
-NG_year <- gbif %>%
-    filter(countrycode == "NG") %>%
-    count(year, basisofrecord, datasetkey) %>%
+NG_year <- gbif |>
+    filter(countrycode == "NG") |>
+    count(year, basisofrecord, datasetkey) |>
     collect()
 
-orgs <- read_tsv("https://api.gbif.org/v1/dataset/search/export?format=TSV&") %>%
-  dplyr::select(publishing_country, dataset_key, title) %>%
+orgs <- read_tsv("https://api.gbif.org/v1/dataset/search/export?format=TSV&") |>
+  dplyr::select(publishing_country, dataset_key, title) |>
   rename(datasetkey = dataset_key)
 
 NG_year_summary <- NG_year |>
@@ -341,10 +346,5 @@ ggplot(data = t2,
   coord_polar("y", start = 200) +
   #geom_text(aes(y = lab.pos, label = paste(perc_obs,"%", sep = "")), col = "white") +
   theme_void() +
-  scale_fill_brewer(palette = "Dark2") + xlim(.2,2.5) +
-  theme(title = element_text("After independence")) 
-```
-
-```{r}
-dbDisconnect(con, shutdown=TRUE)
+  scale_fill_brewer(palette = "Dark2") + xlim(.2,2.5)
 ```
