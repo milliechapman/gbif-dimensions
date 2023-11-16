@@ -1,16 +1,29 @@
 ---
-title: "Figure 1: Examples of global biodiversity data disparities"
+title: "Supporting Information:"
+subtitle: "Human histories shape the biodiversity data that decide our future"
 format: pdf
 editor: visual
 ---
 
-## Load in packages
+While rapidly growing repositories of biodiversity data provide unprecedented insight into ecological patterns at global scales, the application of species observations often belies the reality that the species these data tell us most about is the one they were never intended to include: humans. Biodiversity data trace not only cities and roads but the rise of surveillance technology, shadows of colonial histories, and echoes of contemporary racial and economic disparities.
+
+However, these same data are increasingly used as the starting point to inform the implementation of global policy and the investment of billions of dollars to protect and restore nature over the next decade. Effectively leveraging large-scale biodiversity data to benefit both people and nature requires expertise in social, cultural, and political processes underlying data infrastructures and their histories, just as much as it requires more data and increasingly complex statistical methods.
+
+Here we synthesize examples of the social, political and economic dimensions of human society reflected in global biodiversity data.
+
+In Figure 1, we leverage a the Global Biodiversity Information Facility Data to expand on the cited human dimensions of biodiversity data presented elsewhere in the literature. GBIF releases full species occurrence snapshots monthly. In this paper, we leverage the Sept 31, 2023 Snaphot (<https://doi.org/10.15468/dl.ua9nww>)
+
+## Reproducing Figure 1:
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
 
 ```{r}
 library(geomtextpath)
+library(duckdbfs)
 library(gbifdb) 
 library(tidyverse) 
-library(gbifdb) 
 library(fst) 
 library(sf) 
 library(terra)
@@ -18,17 +31,28 @@ library(raster)
 library(MetBrewer)
 library(rnaturalearth)
 library(countrycode)
+library(arrow)
+library(usmap)
 ```
 
 ## Connect to GBIF snapshot (Oct 2023)
+
+We use a local version of of the Sept 31 2023 GBIF snapshot and the `gbifdb` package to query the database efficiently.
 
 ```{r}
 gbif <- gbif_local("/home/shared-data/gbif/occurrence/2023-10-01/occurrence.parquet/", backend="duckdb")
 ```
 
-## Panel A: Global map
+However, all analysis here can be done by querying the GBIF [AWS snapshot](https://registry.opendata.aws/gbif/) (leveraging the `arrow` package) with the code below.
 
 ```{r}
+# snapshot <- "s3://gbif-open-data-eu-central-1/occurrence/2023-10-01/occurrence.parquet"
+# gbif <- open_dataset(gbif_snapshot)
+```
+
+## Panel A: Global map
+
+```{r cache = TRUE}
 df <- gbif |> 
   mutate(latitude = round(decimallatitude,1), 
          longitude = round(decimallongitude,1)) |> 
@@ -38,7 +62,7 @@ df <- gbif |>
   mutate(n = log(n)) 
 ```
 
-```{r}
+```{r cache = TRUE}
 df_spatial <- df |> 
   filter(!is.na(latitude), 
          !is.na(longitude)) |> 
@@ -54,22 +78,21 @@ global_plot <- rasterize(df_spatial, ras_temp, field = "n", fun='sum')
 # put point in raster # or use the short form "+proj=robin" 
 rm(df_spatial)
 rm(ras_temp)
+```
 
+```{r}
 crs <- "+proj=robin +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m" 
-
 global_plot <- terra::rast(global_plot) 
 global_plot <- global_plot * 1 # to deal with NAs in this datasaet 
-
 global_plot_rob <- terra::project(global_plot, crs, mask=TRUE) 
 rm(global_plot)
 colors <- c("grey", met.brewer(name="Isfahan1",n=20,type="continuous"))
-
-plot(log(global_plot), col = colors, axes = FALSE)
+terra::plot(log(global_plot_rob), col = colors, axes = FALSE)
 ```
 
 ## Panel B: Macroeconomic patterns
 
-```{r}
+```{r cache = TRUE}
 world <- ne_countries(type = "countries", scale = "medium")
 world <- st_as_sf(world) |>
   dplyr::select(iso_a2, income_grp) |>
@@ -81,7 +104,7 @@ world <- st_as_sf(world) |>
   rename(countrycode = iso_a2)
 ```
 
-```{r}
+```{r cache = TRUE}
 country_year <-  gbif |>
     count(countrycode, year) |>
     collect()
@@ -106,7 +129,9 @@ country_year %>% filter(year >1900 & year < 2022) |>
 
 ## Panel C: Redlining
 
-```{r}
+### Redlining data
+
+```{r cache = TRUE}
 holc <- st_read("https://dsl.richmond.edu/panorama/redlining/static/fullDownload.geojson") |>
   dplyr::select(state, city, holc_grade, geometry) |>
   dplyr::filter(!is.na(holc_grade) & holc_grade != 'E') |>
@@ -126,43 +151,50 @@ holc_area  <- holc |>
   ungroup()
 ```
 
-```{r}
+### Map of US observations
+
+```{r cache = TRUE}
 US_pts <- gbif |>
    filter(countrycode == "US") |>
    mutate(latitude = round(decimallatitude,3), 
          longitude = round(decimallongitude,3)) |>
-  count(decimallatitude, decimallongitude) |>
+  count(latitude, longitude) |>
   collect()
 ```
 
-```{r}
-US_pts <- US_pts |>
-  filter(!is.na(decimallatitude), 
-         !is.na(decimallongitude)) |>
-  st_as_sf(coords = c("decimallongitude", "decimallatitude"), 
+```{r cache = TRUE}
+US_pts_sf_all <- US_pts |>
+  filter(!is.na(latitude), 
+         !is.na(longitude)) |>
+  st_as_sf(coords = c("longitude", "latitude"), 
            crs = st_crs(holc)) 
+
+US_pts_sf <- US_pts_sf_all |>  head(1000000) |>
+  st_transform(crs = usmap::usmap_crs())
 ```
 
-```{r fig.width=10, fig.height=10}
-plot_gbif <- US_pts |>
-  mutate(n = )
-  top_n(200000) 
-
-|>
+```{r cache = TRUE, fig.width=10, fig.height=10}
+plot_gbif <- US_pts_sf |>
   ggplot() +
   geom_sf(aes(geometry = geometry), alpha = 0.05,
             size = 0.001, color= "grey") +
-  theme(legend.position = "none")
+  theme(legend.position = "none") 
 
+plot_gbif
 ggsave("../figures/plot_gbif_us.png",plot_gbif, height = 10, width = 10, dpi =300)
+
 ```
 
-```{r}
+### 
+
+### Map of LA: observation and redlining
+
+```{r cache = TRUE}
 la <- holc |> filter(city == "Los Angeles") 
 ext_la <- ext(la) 
-pts_la <- US_year |> 
-  dplyr::select(decimallongitude, decimallatitude, year, n) |>
-  rename(lon = decimallongitude, lat = decimallatitude) |>
+pts_la <- US_pts |> 
+  dplyr::select(longitude, latitude, n) |>
+  rename(lon = longitude, lat = latitude) |>
   filter(lon > ext_la[1] & lon < ext_la[2] &
            lat > ext_la[3] & lat < ext_la[4])
 
@@ -177,8 +209,10 @@ ggspatial::annotation_scale() + theme(legend.position = "none")
 ggsave("../figures/plot_gbif_holcLA.png",holc_la, height = 5, width = 5, dpi =300)
 ```
 
-```{r}
-holc_obs <- st_join(us_pts, holc, join = st_within)
+### Redlining observations summary
+
+```{r cache = TRUE}
+holc_obs <- st_join(US_pts_sf_all, holc, join = st_within)
 holc_obs |> drop_na() |> filter(state=="CA")
 ```
 
@@ -194,19 +228,16 @@ redlining <- as_tibble(holc_obs) %>% drop_na() %>%
   labs(x = "holc grade", y = "sampling density (obs per area)") + coord_flip() #+
   #facet_wrap(~basisofrecord, scales = "free")
 
+redlining
 
 ggsave("../figures/holc-summary.png", redlining, height = 3, width = 3.5, dpi = 300)
 ```
 
-### Map of US
-
-### Map of LA
-
-### Redlining
+### 
 
 ## Panel D: Conflict
 
-```{r}
+```{r cache = TRUE}
 country_year <-  gbif |>
     count(countrycode, year) |>
     collect()
@@ -216,14 +247,14 @@ country_year <-  gbif |>
 #download.file(url = "https://ucdp.uu.se/downloads/ucdpprio/ucdp-prio-acd-231-rds.zip", destfile = "data/conflict.zip")
 #unzip("data/conflict.zip", exdir = "data/")
 
-conflict <- readRDS("data/UcdpPrioConflict_v23_1.rds") |>
+conflict <- readRDS("../data/UcdpPrioConflict_v23_1.rds") |>
   dplyr::select(location, year, intensity_level) |>
   separate_rows(location, sep = ",") |>
   mutate(countrycode = countrycode(location, origin = 'country.name', destination = 'iso2c'))
 ```
 
 ```{r}
-b <- country_year %>%
+conflict <- country_year %>%
   left_join(conflict) %>%
   dplyr::select(-location) %>%
   filter(year >1950) %>%
@@ -247,18 +278,19 @@ b <- country_year %>%
     #sec.axis = sec_axis( trans=~./10, name="freedom of movement")
   ) #+ geom_line(aes(x = year, y = intensity_level*5)) +
 
-ggsave("../figures/war-cambodia.png",b, width = 6, height = 3, dpi = 300)
+conflict
+ggsave("../figures/war-cambodia.png",conflict, width = 6, height = 3, dpi = 300)
 ```
 
 ## Panel E: Colonialism
 
 ```{r}
-download.file("https://geonode.wfp.org/geoserver/wfs?format_options=charset:UTF-8&typename=geonode:khm_adm1_un&outputFormat=SHAPE-ZIP&version=1.0.0&service=WFS&request=GetFeature", destfile = "../data/cambodia.zip")
-unzip("../data/cambodia.zip", "../data/")
-cambodia <- st_read("../data/khm_adm1_un.shp")
+#download.file("https://geonode.wfp.org/geoserver/wfs?format_options=charset:UTF-8&typename=geonode:khm_adm1_un&outputFormat=SHAPE-ZIP&version=1.0.0&service=WFS&request=GetFeature", destfile = "../data/cambodia.zip")
+#unzip("../data/cambodia.zip", "../data/")
+#cambodia <- st_read("../data/khm_adm1_un.shp")
 ```
 
-```{r}
+```{r cache = TRUE}
 NG_year <- gbif %>%
     filter(countrycode == "NG") %>%
     count(year, basisofrecord, datasetkey) %>%
@@ -278,31 +310,41 @@ NG_year_summary <- NG_year |>
   summarise(n = sum(n)) |>
   drop_na()
 
+```
+
+```{r}
 t1 <- NG_year_summary |> 
   group_by(precol) |> mutate(total_obs = sum(n)) |> ungroup()|>
   mutate(perc_obs = n/total_obs) |> filter(precol == "1") |>
   arrange(desc(perc_obs)) %>%
   mutate(lab.pos = cumsum(perc_obs)-.5*perc_obs)
 
-b <- ggplot(data = t1, 
+ggplot(data = t1, 
        aes(x = 2, y = perc_obs, fill = country_data))+
   geom_bar(stat = "identity")+
   coord_polar("y", start = 200) +
   #geom_text(aes(y = lab.pos, label = paste(perc_obs,"%", sep = "")), col = "white") +
   theme_void() +
   scale_fill_brewer(palette = "Dark2") + xlim(.2,2.5)
+```
 
+```{r}
 t2 <- NG_year_summary |> 
   group_by(precol) |> mutate(total_obs = sum(n)) |> ungroup()|>
   mutate(perc_obs = n/total_obs) |> filter(precol == "2") |>
   arrange(desc(perc_obs)) %>%
   mutate(lab.pos = cumsum(perc_obs)-.5*perc_obs)
 
-a <- ggplot(data = t2, 
+ggplot(data = t2, 
        aes(x = 2, y = perc_obs, fill = country_data))+
   geom_bar(stat = "identity")+
   coord_polar("y", start = 200) +
   #geom_text(aes(y = lab.pos, label = paste(perc_obs,"%", sep = "")), col = "white") +
   theme_void() +
-  scale_fill_brewer(palette = "Dark2") + xlim(.2,2.5)
+  scale_fill_brewer(palette = "Dark2") + xlim(.2,2.5) +
+  theme(title = element_text("After independence")) 
+```
+
+```{r}
+dbDisconnect(con, shutdown=TRUE)
 ```
