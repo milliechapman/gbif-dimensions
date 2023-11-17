@@ -2,18 +2,24 @@
 title: "Supporting Information:"
 subtitle: "Human histories shape the biodiversity data that decide our future"
 format: pdf
-editor: visual
+highlight-style: pygments
+#header-includes: \usepackage{setspace}\doublespacing
+bibliography: references.bib
 ---
 
-While rapidly growing repositories of biodiversity data provide unprecedented insight into ecological patterns at global scales, the application of species observations often belies the reality that the species these data tell us most about is the one they were never intended to include: humans. Biodiversity data trace not only cities and roads but the rise of surveillance technology, shadows of colonial histories, and echoes of contemporary racial and economic disparities.
+## Abstract:
 
-However, these same data are increasingly used as the starting point to inform the implementation of global policy and the investment of billions of dollars to protect and restore nature over the next decade. Effectively leveraging large-scale biodiversity data to benefit both people and nature requires expertise in social, cultural, and political processes underlying data infrastructures and their histories, just as much as it requires more data and increasingly complex statistical methods.
+While rapidly growing repositories of biodiversity data provide unprecedented insight into ecological patterns at global scales, the application of species observations often belies the reality that the species these data tell us most about is the one they were never intended to include: humans. Biodiversity data trace not only cities and roads but the rise of surveillance technology, shadows of colonial histories, and echoes of contemporary racial and economic disparities. However, these same data are increasingly used as the starting point to inform the implementation of global policy and the investment of billions of dollars to protect and restore nature over the next decade. Effectively leveraging large-scale biodiversity data to benefit both people and nature requires expertise in social, cultural, and political processes underlying data infrastructures and their histories, just as much as it requires more data and increasingly complex statistical methods.
 
 Here we synthesize examples of the social, political and economic dimensions of human society reflected in global biodiversity data.
 
-In Figure 1, we leverage a the Global Biodiversity Information Facility Data to expand on the cited human dimensions of biodiversity data presented elsewhere in the literature. GBIF releases full species occurrence snapshots monthly. In this paper, we leverage the Sept 31, 2023 Snaphot (<https://doi.org/10.15468/dl.ua9nww>)
+## Exploring social and political dimensions of biodiversity data
 
-## Reproducing Figure 1:
+In Figure 1, we leverage the Global Biodiversity Information Facility (GBIF) to reproduce, update, and expand upon the cited social and political dimensions of biodiversity data presented throughout the scientific literature.
+
+GBIF releases full occurrence "snapshots" monthly. In this paper, we leverage the Sept 31, 2023 Snapshot, which was the most recent at the time of submission. (<https://doi.org/10.15468/dl.ua9nww>) [@gbif.orguser2023]
+
+We provide code to reproduce each panel of the figure and explain how it relates to previously published work cited in the paper.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
@@ -23,6 +29,8 @@ knitr::opts_chunk$set(
   echo = TRUE  # show R code
 )
 ```
+
+Throughout the code we use the following packages [@geomtextpath; @duckdb; @duckdbfs; @gbifdb; @tidyverse; @sf; @terra; @raster; @MetBrewer; @rnaturalearth; @countrycode; @arrow; @usmap]:
 
 ```{r}
 library(geomtextpath)
@@ -38,17 +46,19 @@ library(rnaturalearth)
 library(countrycode)
 library(arrow)
 library(usmap)
+library(svglite)
 ```
 
-## Connect to GBIF snapshot (Oct 2023)
+## Connect to a GBIF snapshot
 
-We use a local version of of the Sept 31 2023 GBIF snapshot and the `gbifdb` package to query the database efficiently.
+We use a local version of of the Sept 31 2023 GBIF snapshot and the `gbifdb` package to query the \>2.6 billion observations in the database.
 
-```{r}
-gbif <- gbif_local("/home/shared-data/gbif/occurrence/2023-10-01/occurrence.parquet/", backend="duckdb")
+```{r snapshot}
+gbif <- gbif_local("/home/shared-data/gbif/occurrence/2023-10-01/occurrence.parquet/",
+                   backend="duckdb")
 ```
 
-However, all analysis here can be done by querying the GBIF [AWS snapshot](https://registry.opendata.aws/gbif/) (leveraging the `arrow` package) with the code below.
+All analysis here can alternatively be done by querying the GBIF [AWS snapshot](https://registry.opendata.aws/gbif/) (leveraging the `arrow` package, see code below).
 
 ```{r}
 # snapshot <- "s3://gbif-open-data-eu-central-1/occurrence/2023-10-01/occurrence.parquet"
@@ -57,47 +67,61 @@ However, all analysis here can be done by querying the GBIF [AWS snapshot](https
 
 ## Panel A: Global map
 
-```{r cache = TRUE}
+We summarize the count of observations at 0.1 decimal degrees. All observations in GBIF with coordinates from the year 1800 onward are included in this map.
+
+```{r global_query, cache = TRUE}
 df <- gbif |> 
   mutate(latitude = round(decimallatitude,1), 
          longitude = round(decimallongitude,1)) |> 
   filter(year >1800) |>
   count(longitude, latitude) |> 
-  collect() |> 
-  mutate(n = log(n)) 
+  collect()
 ```
 
-```{r cache = TRUE}
+We convert the lat/long to spatial points using the `sf` package
+
+```{r global_sf, cache = TRUE}
 df_spatial <- df |> 
   filter(!is.na(latitude), 
          !is.na(longitude)) |> 
   st_as_sf(coords = c("longitude", "latitude"), 
-           crs = "epsg:4326") |> 
-  mutate(n = exp(n)) 
+           crs = "epsg:4326")
 ```
 
-```{r cache = TRUE}
+The log of the sum of observations at each point is converted into a global raster at 0.1 degrees.
+
+```{r global_raster, cache = TRUE}
 ras_temp <-raster(xmn=-180, xmx=180, ymn=-90, ymx=90,
                   resolution=c(0.1,0.1), vals=NA)
-global_plot <- rasterize(df_spatial, ras_temp, field = "n", fun='sum') 
-# put point in raster # or use the short form "+proj=robin" 
-rm(df_spatial)
-rm(ras_temp)
+global_plot <- rasterize(df_spatial, ras_temp, 
+                         field = "n", fun='sum') 
+rm(df_spatial) #remove unnecessary data
+rm(ras_temp) #remove unnecessary data
 ```
 
-```{r cache=TRUE}
+```{r global_plot, cache=TRUE}
 crs <- "+proj=robin +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m" 
 global_plot <- terra::rast(global_plot) 
-global_plot <- global_plot * 1 # to deal with NAs in this datasaet 
-global_plot_rob <- terra::project(global_plot, crs, mask=TRUE) 
-rm(global_plot)
+global_plot <- global_plot * 1 # to deal with NAs in this dataset 
+# reproject for viz
+global_plot <- terra::project(global_plot, crs, mask=TRUE) 
+# define color gradient
 colors <- c("grey", met.brewer(name="Isfahan1",n=20,type="continuous"))
-terra::plot(log(global_plot_rob), col = colors, axes = FALSE)
+# take log for viz
+terra::plot(log(global_plot), col = colors, axes = FALSE)
+```
+
+```{r global_plot_svg, eval = FALSE, include = FALSE}
+svg("../data/panels/panelA.svg")
+terra::plot(log(global_plot), col = colors, axes = FALSE)
+dev.off()
 ```
 
 ## Panel B: Macroeconomic patterns
 
-```{r cache = TRUE}
+In panel B, we show the number of observations (log) per year collected in countries across different income groups.
+
+```{r country_income, cache = TRUE}
 world <- ne_countries(type = "countries", scale = "medium")
 world <- st_as_sf(world) |>
   dplyr::select(iso_a2, income_grp) |>
@@ -109,35 +133,95 @@ world <- st_as_sf(world) |>
   rename(countrycode = iso_a2)
 ```
 
-```{r cache = TRUE}
+Collect count of observations per year per country
+
+```{r query_country_yr, cache = TRUE}
 country_year <-  gbif |>
     count(countrycode, year) |>
     collect()
 ```
 
-```{r}
-country_year %>% filter(year >1900 & year < 2022) |>
-  mutate(n = replace_na(n, 0)) %>%
-  left_join(world) %>%
+Filter to years 1900-2022 and get the sum of observations per country, plot log
+
+```{r panelB}
+macroeconomics <- country_year |>
+  filter(year >1900 & year < 2022) |>
+  mutate(n = replace_na(n, 0)) |>
+  left_join(world) |>
   mutate(income_grp = str_sub(income_grp, 4, -1),
          #INCOME_GRP = gsub("\\s", "\n", INCOME_GRP),
-         income_grp = gsub("\\:.*","",income_grp)) %>%
-  group_by(year, income_grp) %>% 
-  summarise(n = sum(n, na.rm = TRUE)) %>% drop_na() %>%
+         income_grp = gsub("\\:.*","",income_grp)) |>
+  group_by(year, income_grp) |> 
+  summarise(n = sum(n, na.rm = TRUE), area = sum(area)) |>
+  mutate(density = n/area) |>
+  drop_na() |>
   ggplot(aes(year, log(n), color = income_grp, label = income_grp)) + 
   geom_textline(size = 3, fontface = 2, spacing = 30, text_smoothing = 50) + 
   theme_classic() +
   theme(legend.position = "none", legend.title = element_blank()) +
-  labs(x = "") +  scale_color_manual(values=met.brewer("Homer2", 4)) +
-  theme(legend.background = element_rect(colour = 'black', fill = 'white', linetype='solid'))
+  labs(x = "", y = "log(# observations)") +  
+  scale_color_manual(values=met.brewer("Homer2", 4)) +
+  theme(legend.background = 
+          element_rect(colour = 'black', fill = 'white', linetype='solid'))
+macroeconomics
+```
+
+We can see that these patterns hold true if we look at the log(observations) per unit area
+
+```{r macroecon_density}
+macroeconomics_density <- country_year |>
+  filter(year >1900 & year < 2022) |>
+  mutate(n = replace_na(n, 0)) |>
+  left_join(world) |>
+  mutate(income_grp = str_sub(income_grp, 4, -1),
+         #INCOME_GRP = gsub("\\s", "\n", INCOME_GRP),
+         income_grp = gsub("\\:.*","",income_grp)) |>
+  group_by(year, income_grp) |> 
+  summarise(n = sum(n, na.rm = TRUE), area = sum(area)) |>
+  mutate(density = n/area) |>
+  drop_na() |>
+  ggplot(aes(year, log(density), color = income_grp, label = income_grp)) + 
+  geom_textline(size = 3, fontface = 2, spacing = 30, text_smoothing = 50) + 
+  theme_classic() +
+  theme(legend.position = "none", legend.title = element_blank()) +
+  labs(x = "", y = "log(# observations)") +  
+  scale_color_manual(values=met.brewer("Homer2", 4)) +
+  theme(legend.background = 
+          element_rect(colour = 'black', fill = 'white', linetype='solid'))
+macroeconomics_density
+```
+
+```{r include=FALSE}
+# for editors
+svg("../data/panels/panelB.svg", height=3, width=3)
+macroeconomics
+dev.off()
+```
+
+```{r include=FALSE}
+# for editors
+country_year %>% filter(year >1900 & year < 2022) |>
+  mutate(n = replace_na(n, 0)) |>
+  left_join(world) |>
+  mutate(income_grp = str_sub(income_grp, 4, -1),
+         #INCOME_GRP = gsub("\\s", "\n", INCOME_GRP),
+         income_grp = gsub("\\:.*","",income_grp)) |>
+  group_by(year, income_grp) |>
+  summarise(n = sum(n, na.rm = TRUE), area = sum(area)) |>
+  mutate(density = n/area) |>
+  drop_na() |>
+  write_csv("../data/panels/panelB_data.csv")
 ```
 
 ## Panel C: Redlining
 
 ### Redlining data
 
+Redlining data is downloaded from Mapping Inequality (<https://dsl.richmond.edu/panorama/redlining/>) [@holc]. While Ellis-Soto et al., 2023 [@ellis-soto2023] show these patterns in bird data throughout the United States, here we show that similar patterns hold true across all taxa (in aggregate) in GBIF.
+
 ```{r cache = TRUE}
-holc <- st_read("https://dsl.richmond.edu/panorama/redlining/static/fullDownload.geojson") |>
+holc <- 
+  st_read("https://dsl.richmond.edu/panorama/redlining/static/fullDownload.geojson") |>
   dplyr::select(state, city, holc_grade, geometry) |>
   dplyr::filter(!is.na(holc_grade) & holc_grade != 'E') |>
   sf::st_make_valid() 
@@ -158,14 +242,25 @@ holc_area  <- holc |>
 
 ### Map of US observations
 
+Observations in the US are queried and summed at 0.001 decimal degrees.
+
 ```{r cache = TRUE}
+states <- sf::st_as_sf(maps::map("state", 
+                                 plot = FALSE, fill = TRUE)) |>
+  filter(ID!= "alaska" & ID!= "hawaii" )
+ext_states <- ext(states) 
+
 US_pts <- gbif |>
    filter(countrycode == "US") |>
    mutate(latitude = round(decimallatitude,3), 
          longitude = round(decimallongitude,3)) |>
   count(latitude, longitude) |>
-  collect()
+  collect() |>
+  filter(longitude > ext_states[1] & longitude < ext_states[2] &
+           latitude > ext_states[3] & latitude < ext_states[4]) 
 ```
+
+These are converted to a spatial data frame
 
 ```{r cache = TRUE}
 US_pts_sf_all <- US_pts |>
@@ -178,21 +273,29 @@ US_pts_sf <- US_pts_sf_all |>  head(1000000) |>
   st_transform(crs = usmap::usmap_crs())
 ```
 
+For the US map we plot a subset of 1 million points to allow for visualization of point density in cities and around major roads.
+
 ```{r cache = TRUE, fig.width=10, fig.height=10}
 plot_gbif <- US_pts_sf |>
   ggplot() +
   geom_sf(aes(geometry = geometry), alpha = 0.05,
-            size = 0.001, color= "grey") +
-  theme(legend.position = "none") 
+            size = 0.001, color= "black") +
+  theme(legend.position = "none") +
+  theme_void()
 
 plot_gbif
-ggsave("../figures/plot_gbif_us.png",plot_gbif, height = 10, width = 10, dpi =300)
-
 ```
 
-### 
+```{r include=FALSE}
+# for editors
+svg("../data/panels/panelC_US.svg", height=10, width=10)
+plot_gbif
+dev.off()
+```
 
 ### Map of LA: observation and redlining
+
+All observation points are shown as an example in LA.
 
 ```{r cache = TRUE}
 la <- holc |> filter(city == "Los Angeles") 
@@ -206,41 +309,69 @@ pts_la <- US_pts |>
 holc_la <- holc |> filter(city == "Los Angeles") |>
   ggplot() + 
   geom_sf(aes(fill = holc_grade), alpha = 0.7, lwd = 0) +
-    scale_fill_manual(values=c("green4","dodgerblue3", "gold1", "firebrick4")) +
+    scale_fill_manual(
+      values=c("green4","dodgerblue3", "gold1", "firebrick4")) +
   theme_void() + 
-  geom_point(data = pts_la, aes(x = lon, y = lat), color = "grey", alpha= 0.1, size = 0.01) +
+  geom_point(data = pts_la, aes(x = lon, y = lat), 
+             color = "black", alpha= 0.1, size = 0.01) +
 ggspatial::annotation_scale() + theme(legend.position = "none")
 
-ggsave("../figures/plot_gbif_holcLA.png",holc_la, height = 5, width = 5, dpi =300)
+```
+
+```{r include=FALSE}
+# for editors
+svg("../data/panels/panelC_holcLA.svg", height=5, width=5)
+holc_la
+dev.off()
 ```
 
 ### Redlining observations summary
 
+The bar chart shows the number of observations per unit area in each holc grad across all cities included in the Mapping Inequality dataset.
+
 ```{r cache = TRUE}
 holc_obs <- st_join(US_pts_sf_all, holc, join = st_within)
-holc_obs |> drop_na() |> filter(state=="CA")
 ```
 
 ```{r}
-redlining <- as_tibble(holc_obs) %>% drop_na() %>%  
-  group_by(holc_grade) %>%
-  summarise(counts = sum(n)) %>% ungroup() %>%
-  left_join(holc_area) %>%
-  mutate(density = counts/area) %>%
+redlining <- as_tibble(holc_obs) |>
+  drop_na() |>  
+  group_by(holc_grade) |>
+  summarise(counts = sum(n)) %>% ungroup() |>
+  left_join(holc_area) |>
+  mutate(density = counts/area) |>
   ggplot(aes(x = holc_grade, y = density*1000, fill = holc_grade)) + 
-  scale_fill_manual(values=c("green4","dodgerblue3", "gold1", "firebrick4")) +
-  geom_col(width = 0.6, alpha = 0.7) + theme_classic() + theme(legend.position = "none") + 
-  labs(x = "holc grade", y = "sampling density (obs per area)") + coord_flip() #+
-  #facet_wrap(~basisofrecord, scales = "free")
+  scale_fill_manual(
+    values=c("green4","dodgerblue3", "gold1", "firebrick4")) +
+  geom_col(width = 0.6, alpha = 0.7) + theme_classic() + 
+  theme(legend.position = "none") + 
+  labs(x = "holc grade", y = "sampling density (obs per area)") + coord_flip()
 
 redlining
-
-ggsave("../figures/holc-summary.png", redlining, height = 3, width = 3.5, dpi = 300)
 ```
 
-### 
+```{r include=FALSE}
+# for editors
+svg("../data/panels/panelC_holc_bar.svg", height = 3, width = 3.5)
+redlining
+dev.off()
+```
+
+```{r}
+as_tibble(holc_obs) |>
+  drop_na() |>  
+  group_by(holc_grade) |>
+  summarise(counts = sum(n)) |>
+  ungroup() |>
+  left_join(holc_area) |>
+  mutate(density = counts/area*1000) |>
+  dplyr::select(holc_grade, density) |>
+  write_csv("../data/panels/panelC_holc_bar_data.csv")
+```
 
 ## Panel D: Conflict
+
+Following analysis in [@zizka2021] and leveraging the yearly conflict data from the Uppsala Conflict Data Program (UCDP) [@davies2023; @gleditsch2002], we show how biodiversity data observations track conflict both (i) globally and (ii) in Cambodia [@zizka2021] since 1950.
 
 ```{r cache = TRUE}
 country_year <-  gbif |>
@@ -255,45 +386,110 @@ country_year <-  gbif |>
 conflict <- readRDS("../data/UcdpPrioConflict_v23_1.rds") |>
   dplyr::select(location, year, intensity_level) |>
   separate_rows(location, sep = ",") |>
-  mutate(countrycode = countrycode(location, origin = 'country.name', destination = 'iso2c'))
+  mutate(countrycode = 
+           countrycode(location, 
+                       origin = 'country.name', 
+                       destination = 'iso2c'))
 ```
 
 ```{r}
-conflict <- country_year %>%
-  left_join(conflict) %>%
-  dplyr::select(-location) %>%
-  filter(year >1950) %>%
-  mutate(intensity_level = replace_na(intensity_level, 0)) %>%
-  mutate(n = replace_na(n, 0)) %>%
-  filter(countrycode == "KH") %>% 
-  group_by(countrycode, year) |>
-  summarise(intensity_level = max(intensity_level),
-            n = mean(n, na.rm = TRUE)) |>
-  unique() %>% 
+conflict_plot_i <- country_year |>
+  left_join(conflict) |>
+  dplyr::select(-location) |>
+  filter(year >1950 & year <2022) |>
+  mutate(intensity_level = replace_na(intensity_level, 0)) |>
+  mutate(n = replace_na(n, 0)) |>
+  group_by(year, intensity_level) |>
+  summarise( n = sum(n, na.rm = TRUE)) |>
+  unique() |>
   ggplot() + 
-  geom_col(aes(year, (log(n)), fill = as.factor(intensity_level))) + 
-  scale_fill_manual(values= c("darkgrey", "#FF4433", "darkred")) +
-  #scale_fill_manual(values=met.brewer("Renoir", 4)) +
+  geom_line(aes(year, log(n), col = as.factor(intensity_level), group=as.factor(intensity_level))) + 
+  #scale_color_manual(values= c("darkgrey", "#FF4433", "darkred")) +
+  scale_color_manual(values=met.brewer("Renoir", 4)) +
   #geom_line(aes(year, v2xcl_dmove*10), lwd = 1.5, color = "black") + 
-  theme_classic() + theme(legend.position = "none", axis.title.x = element_blank()) +
+  theme_classic() + 
+  theme(legend.position = "none", axis.title.x = element_blank()) +
   scale_y_continuous(
     # Features of the first axis
-    name = "log(observations)"#,
+    name = "log(observations - global)"#,
     # Add a second axis and specify its features
     #sec.axis = sec_axis( trans=~./10, name="freedom of movement")
   ) #+ geom_line(aes(x = year, y = intensity_level*5)) +
 
-conflict
-ggsave("../figures/war-cambodia.png",conflict, width = 6, height = 3, dpi = 300)
+conflict_plot_i
+```
+
+```{r}
+conflict_plot_ii <- country_year |>
+  left_join(conflict) |>
+  dplyr::select(-location) |>
+  filter(year >1950) |>
+  mutate(intensity_level = replace_na(intensity_level, 0)) |>
+  mutate(n = replace_na(n, 0)) |>
+  filter(countrycode == "KH") |>
+  group_by(countrycode, year) |>
+  summarise(intensity_level = max(intensity_level),
+            n = mean(n, na.rm = TRUE)) |>
+  unique() |>
+  ggplot() + 
+  geom_col(aes(year, (log(n)), fill = as.factor(intensity_level))) + 
+  #scale_fill_manual(values= c("darkgrey", "#FF4433", "darkred")) +
+  scale_fill_manual(values=met.brewer("Renoir", 4)) +
+  #geom_line(aes(year, v2xcl_dmove*10), lwd = 1.5, color = "black") + 
+  theme_classic() + 
+  theme(legend.position = "none", axis.title.x = element_blank()) +
+  scale_y_continuous(
+    # Features of the first axis
+    name = "log(observations Cambodia)"#,
+    # Add a second axis and specify its features
+    #sec.axis = sec_axis( trans=~./10, name="freedom of movement")
+  ) #+ geom_line(aes(x = year, y = intensity_level*5)) +
+
+conflict_plot_ii
+```
+
+```{r include = FALSE}
+country_year |>
+  left_join(conflict) |>
+  dplyr::select(-location) |>
+  filter(year >1950) |>
+  mutate(intensity_level = replace_na(intensity_level, 0)) |>
+  mutate(n = replace_na(n, 0)) |>
+  filter(countrycode == "KH") |>
+  group_by(countrycode, year) |>
+  summarise(intensity_level = max(intensity_level),
+            n = mean(n, na.rm = TRUE)) |>
+  write_csv("../data/panels/panelD_ii_data.csv")
+```
+
+```{r}
+country_year |>
+  left_join(conflict) |>
+  dplyr::select(-location) |>
+  filter(year >1950 & year <2022) |>
+  mutate(intensity_level = replace_na(intensity_level, 0)) |>
+  mutate(n = replace_na(n, 0)) |>
+  group_by(year, intensity_level) |>
+  summarise( n = sum(n, na.rm = TRUE)) |>
+  unique() |>
+  write_csv("../data/panels/panelD_i_data.csv")
+```
+
+```{r include = FALSE}
+svg("../data/panels/panelD_i.svg", height=3, width=3)
+conflict_plot_i
+dev.off()
+```
+
+```{r include = FALSE}
+svg("../data/panels/panelD_ii.svg", height=3, width=3)
+conflict_plot_ii
+dev.off()
 ```
 
 ## Panel E: Colonialism
 
-```{r}
-#download.file("https://geonode.wfp.org/geoserver/wfs?format_options=charset:UTF-8&typename=geonode:khm_adm1_un&outputFormat=SHAPE-ZIP&version=1.0.0&service=WFS&request=GetFeature", destfile = "../data/cambodia.zip")
-#unzip("../data/cambodia.zip", "../data/")
-#cambodia <- st_read("../data/khm_adm1_un.shp")
-```
+As explored in [@zizka2021], social and political factors impact who has collected biodiversity data. We reproduce this analysis using the update GBIF snapshot. We can see that the publishing country before and after Nigeria's independence (1960) is drastically different [@zizka2021].
 
 ```{r cache = TRUE}
 NG_year <- gbif |>
@@ -301,6 +497,7 @@ NG_year <- gbif |>
     count(year, basisofrecord, datasetkey) |>
     collect()
 
+# download dataset keys to keep track of publishing country
 orgs <- read_tsv("https://api.gbif.org/v1/dataset/search/export?format=TSV&") |>
   dplyr::select(publishing_country, dataset_key, title) |>
   rename(datasetkey = dataset_key)
@@ -314,8 +511,9 @@ NG_year_summary <- NG_year |>
   group_by(country_data, precol) |>
   summarise(n = sum(n)) |>
   drop_na()
-
 ```
+
+### Observations in Nigeria pre-independence
 
 ```{r}
 t1 <- NG_year_summary |> 
@@ -324,14 +522,25 @@ t1 <- NG_year_summary |>
   arrange(desc(perc_obs)) %>%
   mutate(lab.pos = cumsum(perc_obs)-.5*perc_obs)
 
-ggplot(data = t1, 
+panelE_i <- ggplot(data = t1, 
        aes(x = 2, y = perc_obs, fill = country_data))+
   geom_bar(stat = "identity")+
   coord_polar("y", start = 200) +
-  #geom_text(aes(y = lab.pos, label = paste(perc_obs,"%", sep = "")), col = "white") +
   theme_void() +
   scale_fill_brewer(palette = "Dark2") + xlim(.2,2.5)
+
+panelE_i
 ```
+
+```{r include = FALSE}
+write_csv(t1, "../data/panels/panelE_i.csv")
+
+svg("../data/panels/panelE_i.svg", height=3, width=5)
+panelE_i
+dev.off()
+```
+
+### Observations in Nigeria post-independence
 
 ```{r}
 t2 <- NG_year_summary |> 
@@ -340,11 +549,20 @@ t2 <- NG_year_summary |>
   arrange(desc(perc_obs)) %>%
   mutate(lab.pos = cumsum(perc_obs)-.5*perc_obs)
 
-ggplot(data = t2, 
+panelE_ii <- ggplot(data = t2, 
        aes(x = 2, y = perc_obs, fill = country_data))+
   geom_bar(stat = "identity")+
   coord_polar("y", start = 200) +
-  #geom_text(aes(y = lab.pos, label = paste(perc_obs,"%", sep = "")), col = "white") +
   theme_void() +
   scale_fill_brewer(palette = "Dark2") + xlim(.2,2.5)
 ```
+
+```{r include = FALSE}
+write_csv(t2, "../data/panels/panelE_ii.csv")
+
+svg("../data/panels/panelE_ii.svg", height=3, width=5) 
+panelE_ii 
+dev.off()
+```
+
+## References
