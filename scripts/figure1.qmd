@@ -11,15 +11,15 @@ bibliography: references.bib
 
 While rapidly growing repositories of biodiversity data provide unprecedented insight into ecological patterns at global scales, the application of species observations often belies the reality that the species these data tell us most about is the one they were never intended to include: humans. Biodiversity data trace not only cities and roads but the rise of surveillance technology, shadows of colonial histories, and echoes of contemporary racial and economic disparities. However, these same data are increasingly used as the starting point to inform the implementation of global policy and the investment of billions of dollars to protect and restore nature over the next decade. Effectively leveraging large-scale biodiversity data to benefit both people and nature requires expertise in social, cultural, and political processes underlying data infrastructures and their histories, just as much as it requires more data and increasingly complex statistical methods.
 
-Here we synthesize examples of the social, political and economic dimensions of human society reflected in global biodiversity data.
+In this SI document, we synthesize examples of the social, political and economic dimensions of human society reflected in global biodiversity data.
 
 ## Exploring social and political dimensions of biodiversity data
 
-In Figure 1, we leverage the Global Biodiversity Information Facility (GBIF) to reproduce, update, and expand upon the cited social and political dimensions of biodiversity data presented throughout the scientific literature.
+In Figure 1, we leverage the Global Biodiversity Information Facility (GBIF) occurrence data set to reproduce, visualize, update, and/or expand upon the cited social and political dimensions of biodiversity data presented in the paper.
 
-GBIF releases full occurrence "snapshots" monthly. In this paper, we leverage the Sept 31, 2023 Snapshot, which was the most recent at the time of submission. (<https://doi.org/10.15468/dl.ua9nww>) [@gbif.orguser2023]
+GBIF releases full occurrence "snapshots" monthly. In this paper, we leverage the Sept 31, 2023 Snapshot, which was the most recent at the time of submission. (<https://doi.org/10.15468/dl.ua9nww>) [@gbif.orguser2023]. This snapshot has approximate 2.6 billion occurrence records.
 
-We provide code to reproduce each panel of the figure and explain how it relates to previously published work cited in the paper.
+We provide code to reproduce each panel of Figure 1. All data used is accessed within the code and is openly available.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
@@ -30,7 +30,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-Throughout the code we use the following packages [@geomtextpath; @duckdb; @duckdbfs; @gbifdb; @tidyverse; @sf; @terra; @raster; @MetBrewer; @rnaturalearth; @countrycode; @arrow; @usmap]:
+We use the following packages:
 
 ```{r}
 library(geomtextpath)
@@ -49,16 +49,18 @@ library(usmap)
 library(svglite)
 ```
 
+Package citations: [@geomtextpath; @duckdb; @duckdbfs; @gbifdb; @tidyverse; @sf; @terra; @raster; @MetBrewer; @rnaturalearth; @countrycode; @arrow; @usmap]:
+
 ## Connect to a GBIF snapshot
 
-We use a local version of of the Sept 31 2023 GBIF snapshot and the `gbifdb` package to query the \>2.6 billion observations in the database.
+We use a local copy of the Sept 31, 2023 GBIF snapshot and the `gbifdb` package [@gbifdb] to query the \>2.6 billion observations in the database.
 
 ```{r snapshot}
 gbif <- gbif_local("/home/shared-data/gbif/occurrence/2023-10-01/occurrence.parquet/",
                    backend="duckdb")
 ```
 
-All analysis here can alternatively be done by querying the GBIF [AWS snapshot](https://registry.opendata.aws/gbif/) (leveraging the `arrow` package, see code below).
+All analysis here can alternatively be done by querying the GBIF [AWS snapshot](https://registry.opendata.aws/gbif/) (leveraging the `arrow` package [@arrow]) using the following code:
 
 ```{r}
 # snapshot <- "s3://gbif-open-data-eu-central-1/occurrence/2023-10-01/occurrence.parquet"
@@ -78,7 +80,7 @@ df <- gbif |>
   collect()
 ```
 
-We convert the lat/long to spatial points using the `sf` package
+We convert the lat/long to spatial points using the `sf` package [@sf].
 
 ```{r global_sf, cache = TRUE}
 df_spatial <- df |> 
@@ -98,6 +100,8 @@ global_plot <- rasterize(df_spatial, ras_temp,
 rm(df_spatial) #remove unnecessary data
 rm(ras_temp) #remove unnecessary data
 ```
+
+Reproject to the Robinson projection and plot using the terra package [@terra].
 
 ```{r global_plot, cache=TRUE}
 crs <- "+proj=robin +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m" 
@@ -119,7 +123,7 @@ dev.off()
 
 ## Panel B: Macroeconomic patterns
 
-In panel B, we show the number of observations (log) per year collected in countries across different income groups.
+In panel B, we show the number of observations (log) per year collected in countries across different income groups. The World Bank classifies economies for analytical purposes into four income groups: **low, lower-middle, upper-middle, and high income**. We use these for our analysis.
 
 ```{r country_income, cache = TRUE}
 world <- ne_countries(type = "countries", scale = "medium")
@@ -217,19 +221,20 @@ country_year %>% filter(year >1900 & year < 2022) |>
 
 ### Redlining data
 
-Redlining data is downloaded from Mapping Inequality (<https://dsl.richmond.edu/panorama/redlining/>) [@holc]. While Ellis-Soto et al., 2023 [@ellis-soto2023] show these patterns in bird data throughout the United States, here we show that similar patterns hold true across all taxa (in aggregate) in GBIF.
+Redlining data is downloaded from Mapping Inequality (<https://dsl.richmond.edu/panorama/redlining/>) [@holc]. While Ellis-Soto et al., 2023 [@ellis-soto2023] show similar patterns in bird data throughout redlined cities in the United States, in Panel C we show that qualitatively similar patterns hold true across all taxa (in aggregate) in GBIF.
 
 ```{r cache = TRUE}
+# download redlining geojson 
 holc <- 
   st_read("https://dsl.richmond.edu/panorama/redlining/static/fullDownload.geojson") |>
   dplyr::select(state, city, holc_grade, geometry) |>
   dplyr::filter(!is.na(holc_grade) & holc_grade != 'E') |>
   sf::st_make_valid() 
-
+# remove inalid polygons 
 holc <- holc |>
   dplyr::mutate(valid =st_is_valid(holc)) |> 
   dplyr::filter(valid=="TRUE")
-
+# calculate area per neighborhood
 holc_area  <- holc |>
   mutate(area = st_area(geometry)) |>
   as_tibble() |>
@@ -242,7 +247,7 @@ holc_area  <- holc |>
 
 ### Map of US observations
 
-Observations in the US are queried and summed at 0.001 decimal degrees.
+Observations in the US are queried and summerized at 0.001 decimal degrees.
 
 ```{r cache = TRUE}
 states <- sf::st_as_sf(maps::map("state", 
@@ -260,7 +265,7 @@ US_pts <- gbif |>
            latitude > ext_states[3] & latitude < ext_states[4]) 
 ```
 
-These are converted to a spatial data frame
+These points are converted to a spatial data frame and reprojected. For the US map we plot a subset of 1 million points to allow for visualization of point density in cities and around major roads.
 
 ```{r cache = TRUE}
 US_pts_sf_all <- US_pts |>
@@ -272,8 +277,6 @@ US_pts_sf_all <- US_pts |>
 US_pts_sf <- US_pts_sf_all |>  head(1000000) |>
   st_transform(crs = usmap::usmap_crs())
 ```
-
-For the US map we plot a subset of 1 million points to allow for visualization of point density in cities and around major roads.
 
 ```{r cache = TRUE, fig.width=10, fig.height=10}
 plot_gbif <- US_pts_sf |>
@@ -295,7 +298,7 @@ dev.off()
 
 ### Map of LA: observation and redlining
 
-All observation points are shown as an example in LA.
+We zoom in on LA to show point disparities within a given city. All observation points are shown (no subsetting)
 
 ```{r cache = TRUE}
 la <- holc |> filter(city == "Los Angeles") 
@@ -327,7 +330,7 @@ dev.off()
 
 ### Redlining observations summary
 
-The bar chart shows the number of observations per unit area in each holc grad across all cities included in the Mapping Inequality dataset.
+The bar chart in Panel C shows the number of observations per unit area in each holc grad across all cities included in the Mapping Inequality dataset.
 
 ```{r cache = TRUE}
 holc_obs <- st_join(US_pts_sf_all, holc, join = st_within)
