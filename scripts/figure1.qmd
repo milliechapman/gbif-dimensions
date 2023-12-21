@@ -1,6 +1,6 @@
 ---
 title: "Supporting Information:"
-subtitle: "Human histories shape the biodiversity data that decide our future"
+subtitle: "Biodiversity monitoring for a just planetary future"
 format: pdf
 highlight-style: pygments
 #header-includes: \usepackage{setspace}\doublespacing
@@ -11,13 +11,13 @@ bibliography: references.bib
 
 While rapidly growing repositories of biodiversity data provide unprecedented insight into ecological patterns at global scales, the application of species observations often belies the reality that the species these data tell us most about is the one they were never intended to include: humans. Biodiversity data trace not only cities and roads but the rise of surveillance technology, shadows of colonial histories, and echoes of contemporary racial and economic disparities. However, these same data are increasingly used as the starting point to inform the implementation of global policy and the investment of billions of dollars to protect and restore nature over the next decade. Effectively leveraging large-scale biodiversity data to benefit both people and nature requires expertise in social, cultural, and political processes underlying data infrastructures and their histories, just as much as it requires more data and increasingly complex statistical methods.
 
-In this SI document, we synthesize examples of the social, political and economic dimensions of human society reflected in global biodiversity data.
+In this SI document, we synthesize examples of the social, political and economic dimensions of human society reflected in global biodiversity data. We provide data, code, and citations for reproducing the figure in "Biodiversity monitoring for a just planetary future" (doi:10.1126/science. adh8874)
 
 ## Exploring social and political dimensions of biodiversity data
 
-In Figure 1, we leverage the Global Biodiversity Information Facility (GBIF) occurrence data set to reproduce, visualize, update, and/or expand upon the cited social and political dimensions of biodiversity data presented in the paper.
+In this figure, we leverage the Global Biodiversity Information Facility (GBIF) occurrence data set to reproduce, visualize, update, and/or expand upon the cited social and political dimensions of biodiversity data presented in the paper.
 
-GBIF releases full occurrence "snapshots" monthly. In this paper, we leverage the Sept 31, 2023 Snapshot, which was the most recent at the time of submission. (<https://doi.org/10.15468/dl.ua9nww>) [@gbif.orguser2023]. This snapshot has approximate 2.6 billion occurrence records.
+GBIF releases full occurrence "snapshots" monthly. In this paper, we leverage the Sept 31, 2023 Snapshot, which was the most recent at the time of submission (<https://doi.org/10.15468/dl.ua9nww>) [@gbif.orguser2023]. This snapshot has approximate 2.6 billion occurrence records.
 
 We provide code to reproduce each panel of Figure 1. All data used is accessed within the code and is openly available.
 
@@ -40,7 +40,7 @@ library(tidyverse)
 library(fst) 
 library(sf) 
 library(terra)
-library(raster)
+#library(raster)
 library(MetBrewer)
 library(rnaturalearth)
 library(countrycode)
@@ -63,19 +63,19 @@ gbif <- gbif_local("/home/shared-data/gbif/occurrence/2023-10-01/occurrence.parq
 All analysis here can alternatively be done by querying the GBIF [AWS snapshot](https://registry.opendata.aws/gbif/) (leveraging the `arrow` package [@arrow]) using the following code:
 
 ```{r}
-# snapshot <- "s3://gbif-open-data-eu-central-1/occurrence/2023-10-01/occurrence.parquet"
-# gbif <- open_dataset(gbif_snapshot)
+ #snapshot <- "s3://gbif-open-data-eu-central-1/occurrence/2023-10-01/occurrence.parquet"
+ #gbif <- open_dataset(gbif_snapshot)
 ```
 
 ## Panel A: Global map
 
-We summarize the count of observations at 0.1 decimal degrees. All observations in GBIF with coordinates from the year 1800 onward are included in this map.
+We summarize the count of observations at 0.1 decimal degrees. All observations in GBIF with coordinates are included in this map.
 
 ```{r global_query, cache = TRUE}
 df <- gbif |> 
-  mutate(latitude = round(decimallatitude,1), 
-         longitude = round(decimallongitude,1)) |> 
-  filter(year >1800) |>
+  mutate(latitude = round(decimallatitude,2), 
+         longitude = round(decimallongitude,2)) |> 
+  #filter(year >1800) |>
   count(longitude, latitude) |> 
   collect()
 ```
@@ -87,17 +87,18 @@ df_spatial <- df |>
   filter(!is.na(latitude), 
          !is.na(longitude)) |> 
   st_as_sf(coords = c("longitude", "latitude"), 
-           crs = "epsg:4326")
+           crs = "+proj=robin +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m")
 ```
 
 The log of the sum of observations at each point is converted into a global raster at 0.1 degrees.
 
 ```{r global_raster, cache = TRUE}
+library(raster)
 ras_temp <-raster(xmn=-180, xmx=180, ymn=-90, ymx=90,
                   resolution=c(0.1,0.1), vals=NA)
-global_plot <- rasterize(df_spatial, ras_temp, 
+global_plot_all <- rasterize(df_spatial, ras_temp, 
                          field = "n", fun='sum') 
-rm(df_spatial) #remove unnecessary data
+#rm(df_spatial) #remove unnecessary data
 rm(ras_temp) #remove unnecessary data
 ```
 
@@ -105,25 +106,26 @@ Reproject to the Robinson projection and plot using the terra package [@terra].
 
 ```{r global_plot, cache=TRUE}
 crs <- "+proj=robin +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m" 
-global_plot <- terra::rast(global_plot) 
-global_plot <- global_plot * 1 # to deal with NAs in this dataset 
+global_plot_all <- terra::rast(global_plot_all) 
+global_plot <- global_plot_all * 1 # to deal with NAs in this dataset 
 # reproject for viz
-global_plot <- terra::project(global_plot, crs, mask=TRUE) 
+global_plot_r <- terra::project(global_plot, crs, mask=TRUE) 
 # define color gradient
 colors <- c("grey", met.brewer(name="Isfahan1",n=20,type="continuous"))
 # take log for viz
-terra::plot(log(global_plot), col = colors, axes = FALSE)
+terra::plot(log(global_plot_r,10), col = colors, axes = FALSE)
+writeRaster(global_plot_r, "../data/panels/PanelA_data.tif", overwrite=TRUE)
 ```
 
 ```{r global_plot_svg, eval = FALSE, include = FALSE}
 svg("../data/panels/panelA.svg")
-terra::plot(log(global_plot), col = colors, axes = FALSE)
+terra::plot(log(global_plot_r,10), col = colors, axes = FALSE)
 dev.off()
 ```
 
 ## Panel B: Macroeconomic patterns
 
-In panel B, we show the number of observations (log) per year collected in countries across different income groups. The World Bank classifies economies for analytical purposes into four income groups: **low, lower-middle, upper-middle, and high income**. We use these for our analysis.
+In panel B, we show the cumulative number of observations per hectare collected in countries across different income groups. The World Bank classifies economies for analytical purposes into four income groups: **low, lower-middle, upper-middle, and high income**. We use these for our analysis.
 
 ```{r country_income, cache = TRUE}
 world <- ne_countries(type = "countries", scale = "medium")
@@ -133,7 +135,7 @@ world <- st_as_sf(world) |>
   mutate(area = st_area(geometry)) |>
   as_tibble() |>
   dplyr::select(-geometry) |>
-  mutate(area = as.numeric(area)) |>
+  mutate(area = as.numeric(area)/10000) |>
   rename(countrycode = iso_a2)
 ```
 
@@ -145,74 +147,57 @@ country_year <-  gbif |>
     collect()
 ```
 
-Filter to years 1900-2022 and get the sum of observations per country, plot log
-
-```{r panelB}
-macroeconomics <- country_year |>
-  filter(year >1900 & year < 2022) |>
-  mutate(n = replace_na(n, 0)) |>
-  left_join(world) |>
-  mutate(income_grp = str_sub(income_grp, 4, -1),
-         #INCOME_GRP = gsub("\\s", "\n", INCOME_GRP),
-         income_grp = gsub("\\:.*","",income_grp)) |>
-  group_by(year, income_grp) |> 
-  summarise(n = sum(n, na.rm = TRUE), area = sum(area)) |>
-  mutate(density = n/area) |>
-  drop_na() |>
-  ggplot(aes(year, log(n), color = income_grp, label = income_grp)) + 
-  geom_textline(size = 3, fontface = 2, spacing = 30, text_smoothing = 50) + 
-  theme_classic() +
-  theme(legend.position = "none", legend.title = element_blank()) +
-  labs(x = "", y = "log(# observations)") +  
-  scale_color_manual(values=met.brewer("Homer2", 4)) +
-  theme(legend.background = 
-          element_rect(colour = 'black', fill = 'white', linetype='solid'))
-macroeconomics
-```
-
-We can see that these patterns hold true if we look at the log(observations) per unit area
-
 ```{r macroecon_density}
-macroeconomics_density <- country_year |>
-  filter(year >1900 & year < 2022) |>
+macroeconomics_density_cumulative <- country_year |>
+  filter(year >1949 & year < 2022) |>
   mutate(n = replace_na(n, 0)) |>
   left_join(world) |>
   mutate(income_grp = str_sub(income_grp, 4, -1),
          #INCOME_GRP = gsub("\\s", "\n", INCOME_GRP),
          income_grp = gsub("\\:.*","",income_grp)) |>
   group_by(year, income_grp) |> 
-  summarise(n = sum(n, na.rm = TRUE), area = sum(area)) |>
-  mutate(density = n/area) |>
+  summarise(n = sum(n, na.rm = TRUE), 
+            area = sum(area)) |> ungroup()|>
+  group_by(income_grp) |>
+  mutate(cum_obs = cumsum(n)) |>
+  ungroup() |>
+  mutate(density = cum_obs/area) |>
   drop_na() |>
-  ggplot(aes(year, log(density), color = income_grp, label = income_grp)) + 
-  geom_textline(size = 3, fontface = 2, spacing = 30, text_smoothing = 50) + 
+  ggplot(aes(year, density, color = income_grp, label = income_grp)) + 
+  geom_line() +
+  #geom_textline(size = 3, fontface = 2, spacing = 30, text_smoothing = 50) + 
   theme_classic() +
-  theme(legend.position = "none", legend.title = element_blank()) +
-  labs(x = "", y = "log(# observations)") +  
+  theme(legend.position = "bottom", legend.title = element_blank()) +
+  labs(x = "", y = "observations per ha (cumulative)") +  
   scale_color_manual(values=met.brewer("Homer2", 4)) +
   theme(legend.background = 
           element_rect(colour = 'black', fill = 'white', linetype='solid'))
-macroeconomics_density
+macroeconomics_density_cumulative
 ```
 
 ```{r include=FALSE}
 # for editors
 svg("../data/panels/panelB.svg", height=3, width=3)
-macroeconomics
+macroeconomics_density_cumulative
 dev.off()
 ```
 
 ```{r include=FALSE}
 # for editors
-country_year %>% filter(year >1900 & year < 2022) |>
+country_year |>
+  filter(year >1949 & year < 2022) |>
   mutate(n = replace_na(n, 0)) |>
   left_join(world) |>
   mutate(income_grp = str_sub(income_grp, 4, -1),
          #INCOME_GRP = gsub("\\s", "\n", INCOME_GRP),
          income_grp = gsub("\\:.*","",income_grp)) |>
-  group_by(year, income_grp) |>
-  summarise(n = sum(n, na.rm = TRUE), area = sum(area)) |>
-  mutate(density = n/area) |>
+  group_by(year, income_grp) |> 
+  summarise(n = sum(n, na.rm = TRUE), 
+            area = sum(area)) |> ungroup()|>
+  group_by(income_grp) |>
+  mutate(cum_obs = cumsum(n)) |>
+  ungroup() |>
+  mutate(density = cum_obs/area) |>
   drop_na() |>
   write_csv("../data/panels/panelB_data.csv")
 ```
@@ -221,15 +206,22 @@ country_year %>% filter(year >1900 & year < 2022) |>
 
 ### Redlining data
 
-Redlining data is downloaded from Mapping Inequality (<https://dsl.richmond.edu/panorama/redlining/>) [@holc]. While Ellis-Soto et al., 2023 [@ellis-soto2023] show similar patterns in bird data throughout redlined cities in the United States, in Panel C we show that qualitatively similar patterns hold true across all taxa (in aggregate) in GBIF.
+Redlining data is downloaded from Mapping Inequality (<https://dsl.richmond.edu/panorama/redlining/>) [@holc]. Here we reproduce the patterns found in Ellis-Soto et al., 2023 [@ellis-soto2023] (with an updated snapshot of GBIF data) showing disparities in the density of bird data throughout redlined neighborhoods in the United States.
+
+In the figure, we compare neightborhoods that were deemed (holc grade A) to those deemed most hazardous (holc grade D).
 
 ```{r cache = TRUE}
 # download redlining geojson 
 holc <- 
-  st_read("https://dsl.richmond.edu/panorama/redlining/static/fullDownload.geojson") |>
+  st_read("https://dsl.richmond.edu/panorama/redlining/static/mappinginequality.json") |>
+  rename(holc_grade = grade) |>
   dplyr::select(state, city, holc_grade, geometry) |>
   dplyr::filter(!is.na(holc_grade) & holc_grade != 'E') |>
-  sf::st_make_valid() 
+  sf::st_make_valid() |>
+  mutate(holc_grade = ifelse(holc_grade == "A ", "A",
+                             ifelse(holc_grade == "B ", "B",
+                                    ifelse(holc_grade == "C ", "C",
+                                           ifelse(holc_grade == "D ", "D", holc_grade))))) 
 # remove inalid polygons 
 holc <- holc |>
   dplyr::mutate(valid =st_is_valid(holc)) |> 
@@ -237,26 +229,27 @@ holc <- holc |>
 # calculate area per neighborhood
 holc_area  <- holc |>
   mutate(area = st_area(geometry)) |>
-  as_tibble() |>
+  as_tibble() |> drop_na() |>
   dplyr::select(-geometry) |>
   group_by(holc_grade) |>
   summarise(area = sum(area)) |>
-  mutate(area = as.numeric(area)) |>
-  ungroup()
+  group_by(holc_grade) |>
+  summarise(area = sum(area)) |>
+  mutate(area = as.numeric(area)/10000) # area in ha
 ```
 
-### Map of US observations
+### US observations
 
-Observations in the US are queried and summerized at 0.001 decimal degrees.
+Species observations in class "Aves" in the US are queried and summerized at 0.001 decimal degrees.
 
 ```{r cache = TRUE}
 states <- sf::st_as_sf(maps::map("state", 
-                                 plot = FALSE, fill = TRUE)) |>
-  filter(ID!= "alaska" & ID!= "hawaii" )
+                                 plot = FALSE, fill = TRUE)) 
 ext_states <- ext(states) 
 
 US_pts <- gbif |>
    filter(countrycode == "US") |>
+   filter(class == "Aves") |>
    mutate(latitude = round(decimallatitude,3), 
          longitude = round(decimallongitude,3)) |>
   count(latitude, longitude) |>
@@ -296,78 +289,67 @@ plot_gbif
 dev.off()
 ```
 
-### Map of LA: observation and redlining
-
-We zoom in on LA to show point disparities within a given city. All observation points are shown (no subsetting)
-
-```{r cache = TRUE}
-la <- holc |> filter(city == "Los Angeles") 
-ext_la <- ext(la) 
-pts_la <- US_pts |> 
-  dplyr::select(longitude, latitude, n) |>
-  rename(lon = longitude, lat = latitude) |>
-  filter(lon > ext_la[1] & lon < ext_la[2] &
-           lat > ext_la[3] & lat < ext_la[4])
-
-holc_la <- holc |> filter(city == "Los Angeles") |>
-  ggplot() + 
-  geom_sf(aes(fill = holc_grade), alpha = 0.7, lwd = 0) +
-    scale_fill_manual(
-      values=c("green4","dodgerblue3", "gold1", "firebrick4")) +
-  theme_void() + 
-  geom_point(data = pts_la, aes(x = lon, y = lat), 
-             color = "black", alpha= 0.1, size = 0.01) +
-ggspatial::annotation_scale() + theme(legend.position = "none")
-
-```
-
-```{r include=FALSE}
-# for editors
-svg("../data/panels/panelC_holcLA.svg", height=5, width=5)
-holc_la
-dev.off()
-```
-
 ### Redlining observations summary
 
-The bar chart in Panel C shows the number of observations per unit area in each holc grad across all cities included in the Mapping Inequality dataset.
+The bar chart in Panel C shows the number of aves observations per unit area in grade A vs holc grade D across all cities included in the Mapping Inequality dataset.
 
 ```{r cache = TRUE}
 holc_obs <- st_join(US_pts_sf_all, holc, join = st_within)
 ```
 
 ```{r}
+redline_area <- holc_area |>
+  filter(holc_grade %in% c("A", "D")) |>
+  #filter(holc_grade %in% c("A", "B", "C", "D")) |>
+  mutate(redlined = ifelse(holc_grade == "D", "redlined", "not redlined")) |>
+  group_by(redlined) |>
+  summarise(area = sum(area))
+  
 redlining <- as_tibble(holc_obs) |>
   drop_na() |>  
-  group_by(holc_grade) |>
+  filter(holc_grade %in% c("A", "D")) |>
+  #filter(holc_grade %in% c("A", "B", "C", "D")) |>
+  mutate(redlined = ifelse(holc_grade == "D", "redlined", "not redlined")) |>
+  group_by(redlined) |>
   summarise(counts = sum(n)) %>% ungroup() |>
-  left_join(holc_area) |>
-  mutate(density = counts/area) |>
-  ggplot(aes(x = holc_grade, y = density*1000, fill = holc_grade)) + 
+  left_join(redline_area) |>
+  mutate(density = counts/area) |> drop_na() |> 
+  ggplot(aes(x = redlined, y = density, fill = redlined)) + 
   scale_fill_manual(
-    values=c("green4","dodgerblue3", "gold1", "firebrick4")) +
+    values=c("grey", "firebrick4")) +
   geom_col(width = 0.6, alpha = 0.7) + theme_classic() + 
   theme(legend.position = "none") + 
-  labs(x = "holc grade", y = "sampling density (obs per area)") + coord_flip()
+  labs(y = " sampling density \n (obs per hectare;  birds)", x = "")
+
+as_tibble(holc_obs) |>
+  drop_na() |>  
+  filter(holc_grade %in% c("A", "D")) |>
+  #filter(holc_grade %in% c("A", "B", "C", "D")) |>
+  mutate(redlined = ifelse(holc_grade == "D", "redlined", "not redlined")) |>
+  group_by(redlined) |>
+  summarise(counts = sum(n)) %>% ungroup() |>
+  left_join(redline_area) |>
+  mutate(density = counts/area) |> drop_na() |>
+  write_csv("../data/panels/redlining_simplified.csv")
 
 redlining
 ```
 
 ```{r include=FALSE}
 # for editors
-svg("../data/panels/panelC_holc_bar.svg", height = 3, width = 3.5)
+svg("../data/panels/redlining.svg", height = 3, width = 3)
 redlining
 dev.off()
 ```
 
-```{r}
+```{r include = FALSE}
 as_tibble(holc_obs) |>
   drop_na() |>  
   group_by(holc_grade) |>
   summarise(counts = sum(n)) |>
   ungroup() |>
   left_join(holc_area) |>
-  mutate(density = counts/area*1000) |>
+  mutate(density = counts/area) |>
   dplyr::select(holc_grade, density) |>
   write_csv("../data/panels/panelC_holc_bar_data.csv")
 ```
@@ -406,7 +388,7 @@ conflict_plot_i <- country_year |>
   summarise( n = sum(n, na.rm = TRUE)) |>
   unique() |>
   ggplot() + 
-  geom_line(aes(year, log(n), col = as.factor(intensity_level), group=as.factor(intensity_level))) + 
+  geom_line(aes(year, log(n,10), col = as.factor(intensity_level), group=as.factor(intensity_level))) + 
   #scale_color_manual(values= c("darkgrey", "#FF4433", "darkred")) +
   scale_color_manual(values=met.brewer("Renoir", 4)) +
   #geom_line(aes(year, v2xcl_dmove*10), lwd = 1.5, color = "black") + 
@@ -414,7 +396,7 @@ conflict_plot_i <- country_year |>
   theme(legend.position = "none", axis.title.x = element_blank()) +
   scale_y_continuous(
     # Features of the first axis
-    name = "log(observations - global)"#,
+    name = "log(# observations)"#,
     # Add a second axis and specify its features
     #sec.axis = sec_axis( trans=~./10, name="freedom of movement")
   ) #+ geom_line(aes(x = year, y = intensity_level*5)) +
@@ -424,13 +406,13 @@ conflict_plot_i
 
 ```{r}
 conflict_plot_ii <- country_year |>
-  left_join(conflict) |>
+  filter(countrycode == "KH") |> filter(year >1949 & year < 2022) |> arrange(-year) |>
+  left_join(conflict, by = c("countrycode", "year")) |>
   dplyr::select(-location) |>
-  filter(year >1950) |>
+  filter(year >1949 & year < 2022) |>
   mutate(intensity_level = replace_na(intensity_level, 0)) |>
   mutate(n = replace_na(n, 0)) |>
-  filter(countrycode == "KH") |>
-  group_by(countrycode, year) |>
+  group_by(countrycode, year) |> count()
   summarise(intensity_level = max(intensity_level),
             n = mean(n, na.rm = TRUE)) |>
   unique() |>
@@ -443,7 +425,7 @@ conflict_plot_ii <- country_year |>
   theme(legend.position = "none", axis.title.x = element_blank()) +
   scale_y_continuous(
     # Features of the first axis
-    name = "log(observations Cambodia)"#,
+    name = "log(# observations)"#,
     # Add a second axis and specify its features
     #sec.axis = sec_axis( trans=~./10, name="freedom of movement")
   ) #+ geom_line(aes(x = year, y = intensity_level*5)) +
@@ -469,23 +451,23 @@ country_year |>
 country_year |>
   left_join(conflict) |>
   dplyr::select(-location) |>
-  filter(year >1950 & year <2022) |>
+  filter(year >1949 & year <2022) |>
   mutate(intensity_level = replace_na(intensity_level, 0)) |>
   mutate(n = replace_na(n, 0)) |>
   group_by(year, intensity_level) |>
-  summarise( n = sum(n, na.rm = TRUE)) |>
+  summarise(n = sum(n, na.rm = TRUE)) |>
   unique() |>
   write_csv("../data/panels/panelD_i_data.csv")
 ```
 
 ```{r include = FALSE}
-svg("../data/panels/panelD_i.svg", height=3, width=3)
+svg("../data/panels/panelD_i.svg", height=2.5, width=3)
 conflict_plot_i
 dev.off()
 ```
 
 ```{r include = FALSE}
-svg("../data/panels/panelD_ii.svg", height=3, width=3)
+svg("../data/panels/panelD_ii.svg", height=2.5, width=3)
 conflict_plot_ii
 dev.off()
 ```
@@ -558,6 +540,8 @@ panelE_ii <- ggplot(data = t2,
   coord_polar("y", start = 200) +
   theme_void() +
   scale_fill_brewer(palette = "Dark2") + xlim(.2,2.5)
+
+panelE_ii
 ```
 
 ```{r include = FALSE}
